@@ -1,31 +1,10 @@
 services:
-  gold:
+  predict:
     build: .
-    command: sh -c "while true; do python gold_predict.py && echo '⏱  Next refresh in 30s...' && sleep 30; done"
+    command: sh -c "while true; do python run.py ${MODE:-gold} && echo '⏱  Next refresh in 30s...' && sleep 30; done"
     volumes:
       - ./output:/app/output
     environment:
       - MPLBACKEND=Agg
-      - WATCH=1
-    restart: unless-stopped
-
-  silver:
-    build: .
-    command: sh -c "while true; do python silver_predict.py && echo '⏱  Next refresh in 30s...' && sleep 30; done"
-    volumes:
-      - ./output:/app/output
-    environment:
-      - MPLBACKEND=Agg
-      - WATCH=1
-    restart: unless-stopped
-
-  stock:
-    build: .
-    command: sh -c "while true; do python stock_ID_predict.py ${STOCK:-TOP10} && echo '⏱  Next refresh in 30s...' && sleep 30; done"
-    volumes:
-      - ./output:/app/output
-    environment:
-      - MPLBACKEND=Agg
-      - STOCK=${STOCK:-TOP10}
-      - WATCH=1
+      - MODE=${MODE:-gold}
     restart: unless-stopped
