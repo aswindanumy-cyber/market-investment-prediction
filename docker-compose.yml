@@ -1,10 +1,9 @@
 services:
   predict:
     build: .
-    command: sh -c "while true; do python run.py ${MODE:-gold} && echo '⏱  Next refresh in 30s...' && sleep 30; done"
+    command: sh loop.sh
     volumes:
       - ./output:/app/output
     environment:
       - MPLBACKEND=Agg
-      - MODE=${MODE:-gold}
     restart: unless-stopped
