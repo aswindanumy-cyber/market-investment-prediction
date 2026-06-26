@@ -127,6 +127,178 @@ def signal_label(score):
 # ─────────────────────────────────────────────
 # CHART HELPERS
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# LIVE MACRO FACTOR BUILDER  (Alpha Vantage News Sentiment)
+#
+# Each topic category has keyword triggers.  For each category we find
+# the most relevant recent news article from Alpha Vantage and use its
+# summary as the description — same (label, description) format as before,
+# but fully live and forward-looking.
+#
+# Free API key: https://www.alphavantage.co/support/#api-key
+# Set env var:  ALPHAVANTAGE_API_KEY=<your_key>
+# Falls back to static descriptions if key is missing or API fails.
+# ─────────────────────────────────────────────
+
+import os
+import time
+import urllib.request
+import json
+
+# In-process cache: { cache_key: (timestamp, rows) }
+# Shared across gold/silver within the same Docker process restart.
+# Persisted to disk so it survives between loop runs (different python processes).
+_MACRO_CACHE_FILE = "/app/output/.macro_cache.json"
+_MACRO_CACHE_TTL  = 3600  # 1 hour — stays within free tier of 25 req/day
+
+MACRO_TOPICS_SILVER = [
+    ("Solar panel demand",    ["solar", "photovoltaic", "pv panel", "solar energy"]),
+    ("EV & battery tech",     ["electric vehicle", "ev ", "battery", "charging"]),
+    ("5G & electronics",      ["5g", "semiconductor", "electronics", "smartphone", "chip"]),
+    ("Green energy mandate",  ["renewable", "net zero", "green energy", "wind farm", "climate"]),
+    ("Gold/Silver Ratio",     ["gold silver ratio", "gsr", "silver undervalued"]),
+    ("Central bank buying",   ["central bank", "fed reserve", "silver etf", "etf inflow"]),
+    ("Supply constraints",    ["silver mine", "silver supply", "silver production", "silver deficit"]),
+    ("Inflation hedge",       ["inflation", "cpi", "real rate", "dollar weakness", "hedge"]),
+]
+
+MACRO_TOPICS_GOLD = [
+    ("De-dollarization",      ["de-dollarization", "dollar reserve", "brics", "dollar dump"]),
+    ("US debt trajectory",    ["us debt", "national debt", "debt ceiling", "deficit"]),
+    ("Fed rate cycle",        ["fed rate", "federal reserve", "rate cut", "rate hike", "fomc"]),
+    ("Geopolitical risk",     ["geopolitical", "ukraine", "middle east", "taiwan", "war"]),
+    ("ETF & retail demand",   ["gold etf", "etf inflow", "retail demand", "gold demand"]),
+    ("Mining supply",         ["gold mine", "gold supply", "gold production", "mining"]),
+    ("China & India demand",  ["china gold", "india gold", "central bank buying", "reserve"]),
+    ("Inflation hedge",       ["inflation", "cpi", "real rate", "dollar weakness", "hedge"]),
+]
+
+# urllib.parse is stdlib — imported here so it is available to the functions below
+import urllib.parse
+
+import re
+
+def _av_fetch_news(api_key, asset="GOLD", limit=50):
+    """
+    Two-pass fetch: first try asset-specific ETF tickers; if < 5 articles
+    come back, fall through to broad commodities+economy topic search.
+    Only valid stock/ETF symbols work in AV tickers param — no futures codes.
+    """
+    ticker_map = {"GOLD": "GLD,IAU", "SILVER": "SLV,SIVR"}
+    tickers    = ticker_map.get(asset, "GLD")
+
+    def _call(params):
+        url = "https://www.alphavantage.co/query?function=NEWS_SENTIMENT" + params + f"&sort=RELEVANCE&limit={limit}&apikey={api_key}"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                return json.loads(r.read().decode()).get("feed", [])
+        except Exception:
+            return []
+
+    articles = _call(f"&tickers={urllib.parse.quote(tickers)}")
+    if len(articles) < 5:
+        # Broaden to commodity + macro topics when ticker returns too few hits
+        articles = _call("&topics=commodities,economy_macro,finance")
+
+    return articles
+
+def _clean_title(title):
+    """Strip boilerplate ticker prefixes then trim to 100 chars."""
+    title = re.sub(r"^\([^)]+\)\s*", "", title)
+    title = re.sub(r"^[A-Z]{1,5}:\s*", "", title)
+    title = title.strip()
+    return title[:100] + ("..." if len(title) > 100 else "")
+
+def _best_match(articles, keywords):
+    """
+    Score each article against the category keywords using title+summary.
+    Title keyword hit counts double to keep matching precise.
+    Returns the cleaned title of the best match, or None.
+    """
+    scored = []
+    for a in articles:
+        title   = a.get("title", "").lower()
+        summary = a.get("summary", "").lower()
+        hits    = sum(2 for kw in keywords if kw in title) \
+                + sum(1 for kw in keywords if kw in summary)
+        if hits:
+            scored.append((hits, a))
+    if not scored:
+        return None
+    _, best = max(scored, key=lambda x: x[0])
+    return _clean_title(best.get("title", ""))
+
+def _cache_load(cache_key):
+    try:
+        with open(_MACRO_CACHE_FILE, "r") as f:
+            store = json.load(f)
+        entry = store.get(cache_key)
+        if entry and (time.time() - entry["ts"]) < _MACRO_CACHE_TTL:
+            return entry["rows"]
+    except Exception:
+        pass
+    return None
+
+def _cache_save(cache_key, rows):
+    try:
+        os.makedirs(os.path.dirname(_MACRO_CACHE_FILE), exist_ok=True)
+        store = {}
+        try:
+            with open(_MACRO_CACHE_FILE, "r") as f:
+                store = json.load(f)
+        except Exception:
+            pass
+        store[cache_key] = {"ts": time.time(), "rows": rows}
+        with open(_MACRO_CACHE_FILE, "w") as f:
+            json.dump(store, f)
+    except Exception:
+        pass
+
+def fetch_macro_factors(topic_list, asset="GOLD", fallbacks=None, api_key=None):
+    """
+    Returns list of (label, description) for each topic in topic_list.
+
+    Priority per category:
+      1. Matched article title from Alpha Vantage news (live)
+      2. fallbacks dict entry for the label (live-data string from caller)
+      3. Skipped if neither available
+
+    Results cached 1 hour so free AV tier (25 req/day) is never exceeded.
+    """
+    key = api_key or os.environ.get("ALPHAVANTAGE_API_KEY", "")
+
+    cached = _cache_load(asset)
+    if cached is not None:
+        news_map = {r[0]: r[1] for r in cached}
+    elif key:
+        articles = _av_fetch_news(key, asset=asset, limit=50)
+        print(f"  [macro] fetched {len(articles)} articles from Alpha Vantage ({asset})")
+        news_map = {}
+        for label, keywords in topic_list:
+            desc = _best_match(articles, keywords)
+            if desc:
+                news_map[label] = desc
+        _cache_save(asset, list(news_map.items()))
+    else:
+        news_map = {}
+
+    fb = fallbacks or {}
+    rows = []
+    for label, _ in topic_list:
+        desc = news_map.get(label) or fb.get(label)
+        if desc:
+            rows.append((label, desc))
+
+    return rows
+
+def print_macro_factors(rows, header="Macro Tailwinds / Headwinds"):
+    print(f"\n── {header} ──────────────────────────────")
+    if not rows:
+        print("  (set ALPHAVANTAGE_API_KEY env var for live macro news)")
+        return
+    for label, desc in rows:
+        print(f"  ▸ {label:<24} {desc}")
+
 def dark_axes(axes):
     for ax in (axes if hasattr(axes, "__iter__") else [axes]):
         ax.set_facecolor("#1a1a1a")
@@ -146,3 +318,37 @@ def print_yearly_table(yearly_rows, unit="$"):
     for yr, t_bear, t_base, t_bull, sentiment, drivers in yearly_rows:
         short = drivers[:58] + "..." if len(drivers) > 58 else drivers
         print(f"  {yr:<6} {sentiment:<13} {unit}{t_bear:>11,.2f}  {unit}{t_base:>11,.2f}  {unit}{t_bull:>11,.2f}   {short}")
+
+# ─────────────────────────────────────────────
+# LIVE NEWS  (Yahoo Finance, no API key needed)
+# ─────────────────────────────────────────────
+def fetch_news(ticker, max_items=8):
+    """
+    Returns list of (headline, url) for a ticker using yfinance.
+    Falls back to empty list on any error so callers degrade gracefully.
+    """
+    try:
+        items = yf.Ticker(ticker).news or []
+        out = []
+        for item in items[:max_items]:
+            content = item.get("content", {})
+            title   = content.get("title") or item.get("title", "")
+            url     = (content.get("canonicalUrl", {}) or {}).get("url", "")
+            if title:
+                out.append((title.strip(), url))
+        return out
+    except Exception:
+        return []
+
+def print_news(ticker, label=None, max_items=8):
+    """Print live news headlines for a ticker."""
+    news = fetch_news(ticker, max_items)
+    header = label or ticker
+    print(f"\n── Live News: {header} ─────────────────────────────────")
+    if not news:
+        print("  (no news retrieved)")
+        return
+    for i, (title, url) in enumerate(news, 1):
+        short_url = url.replace("https://", "").split("/")[0] if url else ""
+        src = f"  [{short_url}]" if short_url else ""
+        print(f"  {i}. {title}{src}")

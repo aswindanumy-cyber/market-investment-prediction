@@ -12,6 +12,8 @@ from _base import (
     fetch, sma, ema, rsi, macd, bollinger,
     price_targets, yearly_targets, signal_label,
     dark_axes, fmt_date_axis, print_yearly_table,
+    fetch_macro_factors, print_macro_factors,
+    MACRO_TOPICS_GOLD,
     VERY_BULLISH, BULLISH, NEUTRAL, BEARISH,
 )
 import numpy as np
@@ -25,6 +27,7 @@ silver = fetch("SI=F")        # Silver futures USD/troy oz (co-mover)
 usd    = fetch("DX-Y.NYB")   # US Dollar Index
 vix    = fetch("^VIX")       # Fear Index
 rates  = fetch("^TNX")       # US 10Y Treasury Yield
+crude  = fetch("CL=F")        # Crude oil (inflation proxy)
 
 print(f"✅  Gold data: {gold.index[0].date()} → {gold.index[-1].date()}  ({len(gold)} days)")
 print(f"    Gold spot: ${gold.iloc[-1]:,.2f}/oz\n")
@@ -129,15 +132,6 @@ GOLD_MACRO_CALENDAR = {
 
 yearly_gold = yearly_targets(price, mu_log, vol_log, GOLD_MACRO_CALENDAR)
 
-macro_factors = [
-    ("De-dollarization",         "Central banks globally dumping USD reserves → buying gold"),
-    ("US debt trajectory",       "$36T+ national debt → inflation risk → gold hedge"),
-    ("Fed rate cycle",           "Rate cuts weaken USD → bullish for gold"),
-    ("Geopolitical risk",        "Middle East, Russia-Ukraine, Taiwan tension → safe haven demand"),
-    ("ETF & retail demand",      "Gold ETF inflows trending up post-2024"),
-    ("Mining supply constraints","Gold is hard to find; supply growth <2%/yr"),
-    ("China & India demand",     "World's largest consumers increasing reserves"),
-]
 
 # ─────────────────────────────────────────────
 # 7. PRINT REPORT
@@ -168,9 +162,21 @@ for yr, t_bear, t_base, t_bull, sentiment, drivers in yearly_gold:
     short_driver = drivers[:60] + "..." if len(drivers) > 60 else drivers
     print(f"  {yr:<6} {sentiment:<13} ${t_bear:>7,.0f}  ${t_base:>7,.0f}  ${t_bull:>7,.0f}   {short_driver}")
 
-print("\n── Macro Tailwinds / Headwinds ──────────────────")
-for factor, reason in macro_factors:
-    print(f"  ▸ {factor:<28} {reason}")
+_dxy_v  = float(usd.iloc[-1])
+_r_v    = float(rates.iloc[-1])
+_vix_v  = float(vix.iloc[-1])
+_cr_v   = float(crude.iloc[-1])
+macro_rows = fetch_macro_factors(MACRO_TOPICS_GOLD, asset="GOLD", fallbacks={
+    "De-dollarization":    f"DXY at {_dxy_v:.1f} — {'USD weak, central banks diversifying to gold' if _dxy_v < 100 else 'USD strong, de-doll. trend ongoing but suppressed'}",
+    "US debt trajectory":  "US national debt exceeds $36T; fiscal deficit structurally bullish for gold",
+    "Fed rate cycle":      f"US 10Y yield {_r_v:.2f}% — {'rate cuts expected, gold tailwind' if _r_v < 4 else 'high rates = headwind; watch for Fed pivot'}",
+    "Geopolitical risk":   f"VIX {_vix_v:.1f} — {'elevated fear, safe-haven flows active' if _vix_v > 20 else 'low fear; geopolitical premium compressed'}",
+    "ETF & retail demand": "Gold ETF inflows driven by inflation hedge demand and portfolio diversification",
+    "Mining supply":       "Global gold mine output growth <2%/yr; new discoveries declining since 2015",
+    "China & India demand":"World's two largest consumers increasing reserve allocations to gold",
+    "Inflation hedge":     f"WTI crude ${_cr_v:.1f}/bbl — {'oil-driven inflation supports gold hedge demand' if _cr_v > 75 else 'low oil, mild inflation; gold hedge demand moderate'}",
+})
+print_macro_factors(macro_rows, "Macro Tailwinds / Headwinds (Gold)")
 
 print("\n── Key Levels ───────────────────────────────────")
 print(f"  SMA 20:   ${last['sma20']:,.2f}    SMA 50:  ${last['sma50']:,.2f}    SMA 200: ${last['sma200']:,.2f}")

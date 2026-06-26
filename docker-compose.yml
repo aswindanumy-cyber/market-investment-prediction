@@ -6,4 +6,5 @@ services:
       - .:/app
     environment:
       - MPLBACKEND=Agg
+      - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY:-}
     restart: unless-stopped

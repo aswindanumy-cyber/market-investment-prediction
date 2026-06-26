@@ -17,7 +17,7 @@ Dependencies:
 from _base import (
     sma, ema, rsi, macd, bollinger,
     price_targets, signal_label,
-    dark_axes, fmt_date_axis,
+    dark_axes, fmt_date_axis, print_news,
 )
 import sys
 import numpy as np
@@ -394,6 +394,7 @@ def run_single(ticker_code):
     print(f"  3-Month  │ Bear: {t3[0]:>12,.0f}  Base: {t3[1]:>12,.0f}  Bull: {t3[2]:>12,.0f}")
     print(f"  12-Month │ Bear: {t12[0]:>12,.0f}  Base: {t12[1]:>12,.0f}  Bull: {t12[2]:>12,.0f}")
     print(f"  2030     │ Bear: {t2030[0]:>12,.0f}  Base: {t2030[1]:>12,.0f}  Bull: {t2030[2]:>12,.0f}")
+    print_news(f"{code.upper()}.JK", f"{code.upper()} — Latest News")
     print("\n⚠️   DISCLAIMER: Not financial advice.")
     print("=" * 68)
 

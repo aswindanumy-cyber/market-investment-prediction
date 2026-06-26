@@ -15,6 +15,8 @@ from _base import (
     fetch, sma, ema, rsi, macd, bollinger,
     price_targets, yearly_targets, signal_label,
     dark_axes, fmt_date_axis, print_yearly_table,
+    fetch_macro_factors, print_macro_factors,
+    MACRO_TOPICS_SILVER,
     VERY_BULLISH, BULLISH, NEUTRAL,
 )
 import numpy as np
@@ -32,6 +34,7 @@ usd    = fetch("DX-Y.NYB")   # US Dollar Index
 copper = fetch("HG=F")       # Copper (industrial proxy)
 vix    = fetch("^VIX")       # Fear index
 rates  = fetch("^TNX")       # US 10Y Treasury yield
+crude  = fetch("CL=F")        # Crude oil (inflation proxy)
 
 print(f"✅  Silver data: {silver.index[0].date()} → {silver.index[-1].date()}  ({len(silver)} days)")
 print(f"    Silver spot: ${silver.iloc[-1]:.2f}/oz   Gold spot: ${gold.iloc[-1]:.2f}/oz\n")
@@ -119,16 +122,6 @@ SILVER_MACRO_CALENDAR = {
 
 yearly_silver = yearly_targets(price, mu_log, vol_log, SILVER_MACRO_CALENDAR)
 
-macro_factors = [
-    ("Solar panel demand",   "Each panel uses ~20g silver; solar capacity doubling every 3yrs"),
-    ("EV & battery tech",    "Silver conductivity critical in EV charging & battery management"),
-    ("5G & electronics",     "Every smartphone, chip, and PCB uses silver"),
-    ("Green energy mandate", "Global net-zero targets drive massive industrial silver demand"),
-    ("Gold/Silver Ratio",    f"Current GSR {gsr:.1f}x — historical mean ~65x; reversion = upside"),
-    ("Central bank buying",  "Less than gold, but ETF inflows picking up"),
-    ("Supply constraints",   "Primary silver mines declining; mostly byproduct of copper/zinc mining"),
-    ("Inflation hedge",      "Like gold but with industrial kicker = double tailwind"),
-]
 
 print("=" * 60)
 print("        SILVER PRICE PREDICTOR REPORT")
@@ -152,9 +145,22 @@ print(f"  12-Month │ Bear: ${t12b:>7,.2f}  Base: ${t12:>7,.2f}  Bull: ${t12u:>
 
 print_yearly_table(yearly_silver)
 
-print("\n── Macro & Industrial Tailwinds ─────────────────")
-for factor, reason in macro_factors:
-    print(f"  ▸ {factor:<28} {reason}")
+_gsr_v  = float(last["gsr"])
+_dxy_v  = float(usd.iloc[-1])
+_r_v    = float(rates.iloc[-1])
+_cu_v   = float(copper.iloc[-1])
+_cr_v   = float(crude.iloc[-1])
+macro_rows = fetch_macro_factors(MACRO_TOPICS_SILVER, asset="SILVER", fallbacks={
+    "Solar panel demand":   "Each solar panel uses ~20g silver; global solar capacity projected to 3x by 2030",
+    "EV & battery tech":    f"Copper at ${_cu_v:.2f}/lb — {'strong industrial demand, bullish for silver' if _cu_v > 4 else 'weak industrial signal; watch EV adoption pace'}",
+    "5G & electronics":     "5G densification & AI chip demand drive silver paste consumption in PCBs",
+    "Green energy mandate": "Net-zero targets require ~200M extra oz/yr silver by 2030 vs current supply",
+    "Gold/Silver Ratio":    f"GSR {_gsr_v:.1f}x — {'silver severely undervalued; mean reversion = strong upside' if _gsr_v > 80 else f'GSR at {_gsr_v:.1f}x, near historical mean ~65x'}",
+    "Central bank buying":  "Silver ETF inflows accelerating; central bank alternatives to gold increasing",
+    "Supply constraints":   "Primary silver mine output declining; 70% is byproduct of copper/zinc/lead mines",
+    "Inflation hedge":      f"WTI ${_cr_v:.1f}/bbl, 10Y {_r_v:.2f}% — {'inflation re-accelerating, silver hedge demand rising' if _r_v < 4 else 'high rates = headwind but industrial demand offsets'}",
+})
+print_macro_factors(macro_rows, "Macro Tailwinds / Headwinds (Silver)")
 
 print("\n── Key Levels ───────────────────────────────────")
 print(f"  SMA 20:  ${last['sma20']:,.2f}    SMA 50: ${last['sma50']:,.2f}    SMA 200: ${last['sma200']:,.2f}")
