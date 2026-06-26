@@ -23,29 +23,30 @@ from datetime import datetime, timedelta
 # ─────────────────────────────────────────────
 # 1. FETCH DATA
 # ─────────────────────────────────────────────
-TICKERS = {
-    "gold":   "GC=F",    # Gold Futures
-    "usd":    "DX-Y.NYB",# US Dollar Index
-    "sp500":  "^GSPC",   # S&P 500
-    "vix":    "^VIX",    # Fear Index
-    "rates":  "^TNX",    # US 10Y Treasury Yield
-    "silver": "SI=F",    # Silver (gold co-mover)
-}
+def _fetch(ticker, period="5y"):
+    df = yf.download(ticker, period=period, interval="1d", auto_adjust=True, progress=False)["Close"]
+    if isinstance(df, pd.DataFrame):
+        df = df.squeeze()
+    return df.dropna().rename(ticker)
 
 print("📡  Fetching market data...")
-raw = yf.download(
-    list(TICKERS.values()),
-    period="5y",
-    interval="1d",
-    auto_adjust=True,
-    progress=False,
-)["Close"]
-raw.columns = list(TICKERS.keys())
-raw.dropna(subset=["gold"], inplace=True)
-raw.ffill(inplace=True)
+gold   = _fetch("GC=F")        # Gold futures USD/troy oz
+silver = _fetch("SI=F")        # Silver futures USD/troy oz (co-mover)
+usd    = _fetch("DX-Y.NYB")   # US Dollar Index
+vix    = _fetch("^VIX")       # Fear Index
+rates  = _fetch("^TNX")       # US 10Y Treasury Yield
 
-gold = raw["gold"]
-print(f"✅  Gold data: {raw.index[0].date()} → {raw.index[-1].date()}  ({len(raw)} days)\n")
+print(f"✅  Gold data: {gold.index[0].date()} → {gold.index[-1].date()}  ({len(gold)} days)")
+print(f"    Gold spot: ${gold.iloc[-1]:,.2f}/oz\n")
+
+# Align all to gold index
+raw = pd.DataFrame({
+    "gold":   gold,
+    "usd":    usd.reindex(gold.index, method="ffill"),
+    "vix":    vix.reindex(gold.index, method="ffill"),
+    "rates":  rates.reindex(gold.index, method="ffill"),
+}).dropna(subset=["gold"])
+raw.ffill(inplace=True)
 
 # ─────────────────────────────────────────────
 # 2. TECHNICAL INDICATORS
@@ -138,10 +139,11 @@ else:
 # ─────────────────────────────────────────────
 # 4. SHORT / MID TERM PRICE TARGETS
 # ─────────────────────────────────────────────
-# Use trailing 6-month average daily return + volatility
-returns = gold.pct_change().dropna()
-mu_daily  = returns[-126:].mean()        # 6-month mean daily return
-vol_daily = returns[-126:].std()
+# Use trailing 6-month returns, winsorized at ±5% to strip futures-roll outliers
+returns   = gold.pct_change().dropna()
+ret_clean = returns[-126:].clip(-0.05, 0.05)
+mu_daily  = ret_clean.mean()
+vol_daily = ret_clean.std()
 
 days_3m  = 63
 days_12m = 252
@@ -153,6 +155,10 @@ target_3m_bear = price * (1 + mu_daily - vol_daily) ** days_3m
 target_1y_base = price * (1 + mu_daily) ** days_12m
 target_1y_bull = price * (1 + mu_daily + vol_daily) ** days_12m
 target_1y_bear = price * (1 + mu_daily - vol_daily) ** days_12m
+
+# Floor at zero to avoid negative prices
+target_3m_bear = max(target_3m_bear, price * 0.5)
+target_1y_bear = max(target_1y_bear, price * 0.3)
 
 # ─────────────────────────────────────────────
 # 5. 2030 LONG-TERM PREDICTION (Polynomial Regression)

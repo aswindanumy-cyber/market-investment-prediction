@@ -3,7 +3,7 @@ services:
     build: .
     command: sh loop.sh
     volumes:
-      - ./output:/app/output
+      - .:/app
     environment:
       - MPLBACKEND=Agg
     restart: unless-stopped

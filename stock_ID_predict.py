@@ -269,14 +269,15 @@ def signal_label(score):
 # PRICE TARGETS
 # ─────────────────────────────────────────────
 def price_targets(price_series):
-    s   = price_series.dropna()
-    ret = s.pct_change().dropna()
-    mu  = ret[-126:].mean()
-    vol = ret[-126:].std()
-    p   = s.iloc[-1]
+    s         = price_series.dropna()
+    ret       = s.pct_change().dropna()
+    ret_clean = ret[-126:].clip(-0.05, 0.05)   # winsorize: strip gap/halt outliers
+    mu        = ret_clean.mean()
+    vol       = ret_clean.std()
+    p         = s.iloc[-1]
 
-    t3  = (p*(1+mu-vol)**63,  p*(1+mu)**63,  p*(1+mu+vol)**63)
-    t12 = (p*(1+mu-vol)**252, p*(1+mu)**252, p*(1+mu+vol)**252)
+    t3  = (max(p*(1+mu-vol)**63,  p*0.5), p*(1+mu)**63,  p*(1+mu+vol)**63)
+    t12 = (max(p*(1+mu-vol)**252, p*0.3), p*(1+mu)**252, p*(1+mu+vol)**252)
 
     monthly = s.resample("ME").last()
     X       = np.arange(len(monthly)).reshape(-1, 1)
@@ -286,7 +287,7 @@ def price_targets(price_series):
     fX      = np.arange(len(monthly), len(monthly) + m2030).reshape(-1, 1)
     fy      = reg.predict(poly.transform(fX))
     t2030_b = max(fy[-1], p)
-    ann_v   = ret.std() * np.sqrt(252)
+    ann_v   = ret_clean.std() * np.sqrt(252)
     yrs     = (datetime(2030, 12, 31) - datetime.now()).days / 365
     t2030   = (t2030_b*(1-ann_v*0.3)**yrs, t2030_b, t2030_b*(1+ann_v*0.6)**yrs)
     return t3, t12, t2030, monthly, fX, fy, poly
@@ -667,8 +668,8 @@ def run_halal():
     plot_scanner(buy_df, div_df, "IDX HALAL — Buy Now vs Dividend")
 
 def run_dividen():
-    """Top 20 — ex-date ≤30 days AND payout per lot ≥10% of price per lot."""
-    df     = scan_universe(halal_only=False)
+    """Top 20 halal stocks — ex-date ≤30 days AND payout per lot ≥10% of price per lot."""
+    df     = scan_universe(halal_only=True)
     div_df = print_best_dividend(df, "IDX DIVIDEN")
     if div_df.empty:
         return

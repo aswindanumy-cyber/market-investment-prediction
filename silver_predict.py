@@ -24,34 +24,24 @@ from sklearn.preprocessing import PolynomialFeatures
 from datetime import datetime
 
 # ─────────────────────────────────────────────
-# 1. FETCH DATA
+# 1. FETCH DATA  (each ticker individually — avoids yfinance column-order bug)
 # ─────────────────────────────────────────────
-TICKERS = {
-    "silver": "SI=F",     # Silver Futures
-    "gold":   "GC=F",     # Gold (for GSR)
-    "usd":    "DX-Y.NYB", # US Dollar Index
-    "copper": "HG=F",     # Copper (industrial proxy)
-    "sp500":  "^GSPC",    # Risk appetite
-    "vix":    "^VIX",     # Fear
-    "rates":  "^TNX",     # 10Y Treasury
-    "slv":    "SLV",      # iShares Silver ETF (fund flow proxy)
-}
+def _fetch(ticker, period="5y"):
+    df = yf.download(ticker, period=period, interval="1d", auto_adjust=True, progress=False)["Close"]
+    if isinstance(df, pd.DataFrame):
+        df = df.squeeze()
+    return df.dropna().rename(ticker)
 
 print("📡  Fetching market data...")
-raw = yf.download(
-    list(TICKERS.values()),
-    period="5y",
-    interval="1d",
-    auto_adjust=True,
-    progress=False,
-)["Close"]
-raw.columns = list(TICKERS.keys())
-raw.dropna(subset=["silver"], inplace=True)
-raw.ffill(inplace=True)
+silver = _fetch("SI=F")        # Silver futures USD/troy oz
+gold   = _fetch("GC=F")        # Gold futures USD/troy oz (for GSR)
+usd    = _fetch("DX-Y.NYB")   # US Dollar Index
+copper = _fetch("HG=F")       # Copper (industrial proxy)
+vix    = _fetch("^VIX")       # Fear index
+rates  = _fetch("^TNX")       # US 10Y Treasury yield
 
-silver = raw["silver"]
-gold   = raw["gold"]
-print(f"✅  Silver data: {raw.index[0].date()} → {raw.index[-1].date()}  ({len(raw)} days)\n")
+print(f"✅  Silver data: {silver.index[0].date()} → {silver.index[-1].date()}  ({len(silver)} days)")
+print(f"    Silver spot: ${silver.iloc[-1]:.2f}/oz   Gold spot: ${gold.iloc[-1]:.2f}/oz\n")
 
 # ─────────────────────────────────────────────
 # 2. TECHNICAL INDICATORS
@@ -75,7 +65,7 @@ def bollinger(s, n=20, k=2):
     std = s.rolling(n).std()
     return mid - k * std, mid, mid + k * std
 
-ta = pd.DataFrame(index=raw.index)
+ta = pd.DataFrame(index=silver.index)
 ta["silver"]  = silver
 ta["sma20"]   = sma(silver, 20)
 ta["sma50"]   = sma(silver, 50)
@@ -83,11 +73,11 @@ ta["sma200"]  = sma(silver, 200)
 ta["rsi"]     = rsi(silver)
 ta["macd"], ta["macd_sig"] = macd(silver)
 ta["bb_lo"], ta["bb_mid"], ta["bb_hi"] = bollinger(silver)
-ta["gsr"]     = gold / silver          # Gold/Silver Ratio
-ta["copper"]  = raw["copper"]
-ta["usd"]     = raw["usd"]
-ta["vix"]     = raw["vix"]
-ta["rates"]   = raw["rates"]
+ta["gsr"]     = gold.reindex(silver.index, method="ffill") / silver
+ta["copper"]  = copper.reindex(silver.index, method="ffill")
+ta["usd"]     = usd.reindex(silver.index, method="ffill")
+ta["vix"]     = vix.reindex(silver.index, method="ffill")
+ta["rates"]   = rates.reindex(silver.index, method="ffill")
 ta.dropna(inplace=True)
 
 last  = ta.iloc[-1]
@@ -99,12 +89,10 @@ gsr   = last["gsr"]
 # ─────────────────────────────────────────────
 scores = {}
 
-# Trend
 scores["SMA20 > SMA50"]         = 8 if last["sma20"] > last["sma50"]  else 2
 scores["SMA50 > SMA200"]        = 8 if last["sma50"] > last["sma200"] else 2
 scores["Price > SMA200"]        = 8 if price > last["sma200"]          else 2
 
-# Momentum
 rsi_val = last["rsi"]
 if rsi_val < 30:   scores["RSI (oversold=buy)"]  = 9
 elif rsi_val > 70: scores["RSI (overbought)"]    = 2
@@ -112,25 +100,21 @@ else:              scores["RSI (neutral)"]        = 5
 
 scores["MACD cross"] = 7 if last["macd"] > last["macd_sig"] else 3
 
-# Bollinger
 if price < last["bb_lo"]:   scores["Bollinger (below lo)"] = 9
 elif price > last["bb_hi"]: scores["Bollinger (above hi)"] = 2
 else:                        scores["Bollinger (mid)"]      = 5
 
-# Gold/Silver Ratio — historically mean ~65; high GSR = silver cheap vs gold
 if gsr > 80:   scores["GSR >80 (silver undervalued)"] = 9
 elif gsr > 65: scores["GSR 65-80 (slightly cheap)"]   = 6
 else:          scores["GSR <65 (silver expensive)"]    = 3
 
-# Copper trend (industrial proxy)
-copper_1m = raw["copper"].iloc[-22] if len(raw) > 22 else raw["copper"].iloc[0]
+copper_1m = ta["copper"].iloc[-22] if len(ta) > 22 else ta["copper"].iloc[0]
 scores["Copper rising (industrial)"] = 7 if last["copper"] > copper_1m else 3
 
-# Macro
-usd_1m = raw["usd"].iloc[-22] if len(raw) > 22 else raw["usd"].iloc[0]
-scores["USD weak (silver up)"]        = 3 if last["usd"] > usd_1m else 8
-scores["VIX fear (>20=safe haven)"]   = 7 if last["vix"] > 20    else 4
-scores["10Y rates (<3=silver up)"]    = 7 if last["rates"] < 3    else 3
+usd_1m = ta["usd"].iloc[-22] if len(ta) > 22 else ta["usd"].iloc[0]
+scores["USD weak (silver up)"]      = 3 if last["usd"] > usd_1m else 8
+scores["VIX fear (>20=safe haven)"] = 7 if last["vix"] > 20    else 4
+scores["10Y rates (<3=silver up)"]  = 7 if last["rates"] < 3    else 3
 
 total_score = np.mean(list(scores.values()))
 
@@ -141,53 +125,47 @@ else:                    signal = "🟡  HOLD"
 # ─────────────────────────────────────────────
 # 4. PRICE TARGETS
 # ─────────────────────────────────────────────
+# Winsorize at ±5% to strip futures-roll outliers before computing targets
 returns   = silver.pct_change().dropna()
-mu_daily  = returns[-126:].mean()
-vol_daily = returns[-126:].std()
+ret_clean = returns[-126:].clip(-0.05, 0.05)
+mu_daily  = ret_clean.mean()
+vol_daily = ret_clean.std()
 
-t3b  = price * (1 + mu_daily - vol_daily) ** 63
+t3b  = max(price * (1 + mu_daily - vol_daily) ** 63,  price * 0.5)
 t3   = price * (1 + mu_daily) ** 63
 t3u  = price * (1 + mu_daily + vol_daily) ** 63
-t12b = price * (1 + mu_daily - vol_daily) ** 252
+t12b = max(price * (1 + mu_daily - vol_daily) ** 252, price * 0.3)
 t12  = price * (1 + mu_daily) ** 252
 t12u = price * (1 + mu_daily + vol_daily) ** 252
 
-# 2030 polynomial regression
-silver_monthly = silver.resample("ME").last()
-X  = np.arange(len(silver_monthly)).reshape(-1, 1)
-y  = silver_monthly.values
-Xp = PolynomialFeatures(2).fit_transform(X)
-reg = LinearRegression().fit(Xp, y)
-
-months_to_2030 = (datetime(2030, 12, 31) - silver_monthly.index[-1]).days // 30
-future_X  = np.arange(len(silver_monthly), len(silver_monthly) + months_to_2030).reshape(-1, 1)
-poly      = PolynomialFeatures(2)
-poly.fit_transform(X)
-future_y  = reg.predict(poly.transform(future_X))
-t2030     = max(future_y[-1], price)
-
-annual_vol    = returns.std() * np.sqrt(252)
-years_to_2030 = (datetime(2030, 12, 31) - datetime.now()).days / 365
-t2030_bull    = t2030 * (1 + annual_vol * 0.6) ** years_to_2030
-t2030_bear    = t2030 * (1 - annual_vol * 0.3) ** years_to_2030
+silver_monthly  = silver.resample("ME").last()
+X               = np.arange(len(silver_monthly)).reshape(-1, 1)
+poly            = PolynomialFeatures(2)
+Xp              = poly.fit_transform(X)
+reg             = LinearRegression().fit(Xp, silver_monthly.values)
+months_to_2030  = (datetime(2030, 12, 31) - silver_monthly.index[-1]).days // 30
+future_X        = np.arange(len(silver_monthly), len(silver_monthly) + months_to_2030).reshape(-1, 1)
+future_y        = reg.predict(poly.transform(future_X))
+t2030           = max(future_y[-1], price)
+annual_vol      = returns.std() * np.sqrt(252)
+years_to_2030   = (datetime(2030, 12, 31) - datetime.now()).days / 365
+t2030_bull      = t2030 * (1 + annual_vol * 0.6) ** years_to_2030
+t2030_bear      = t2030 * (1 - annual_vol * 0.3) ** years_to_2030
 
 # ─────────────────────────────────────────────
-# 5. MACRO / STRUCTURAL FACTORS
+# 5. REPORT
 # ─────────────────────────────────────────────
 macro_factors = [
-    ("Solar panel demand",       "Each panel uses ~20g silver; solar capacity doubling every 3yrs"),
-    ("EV & battery tech",        "Silver conductivity critical in EV charging & battery management"),
-    ("5G & electronics",         "Every smartphone, chip, and PCB uses silver"),
-    ("Green energy mandate",     "Global net-zero targets drive massive industrial silver demand"),
-    ("Gold/Silver Ratio",        f"Current GSR {gsr:.1f}x — historical mean ~65x; reversion = upside"),
-    ("Central bank buying",      "Less than gold, but ETF inflows picking up"),
-    ("Supply constraints",       "Primary silver mines declining; mostly byproduct of copper/zinc mining"),
-    ("Inflation hedge",          "Like gold but with industrial kicker = double tailwind"),
+    ("Solar panel demand",   "Each panel uses ~20g silver; solar capacity doubling every 3yrs"),
+    ("EV & battery tech",    "Silver conductivity critical in EV charging & battery management"),
+    ("5G & electronics",     "Every smartphone, chip, and PCB uses silver"),
+    ("Green energy mandate", "Global net-zero targets drive massive industrial silver demand"),
+    ("Gold/Silver Ratio",    f"Current GSR {gsr:.1f}x — historical mean ~65x; reversion = upside"),
+    ("Central bank buying",  "Less than gold, but ETF inflows picking up"),
+    ("Supply constraints",   "Primary silver mines declining; mostly byproduct of copper/zinc mining"),
+    ("Inflation hedge",      "Like gold but with industrial kicker = double tailwind"),
 ]
 
-# ─────────────────────────────────────────────
-# 6. REPORT
-# ─────────────────────────────────────────────
 print("=" * 60)
 print("        SILVER PRICE PREDICTOR REPORT")
 print(f"        Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -200,7 +178,7 @@ print(f"⚖️   Gold/Silver Ratio:    {gsr:.1f}x  (mean ~65x)\n")
 
 print("── Technical Breakdown ─────────────────────────")
 for k, v in scores.items():
-    bar = "█" * int(v) + "░" * (10 - int(v))
+    bar       = "█" * int(v) + "░" * (10 - int(v))
     sentiment = "bullish" if v >= 6 else ("bearish" if v <= 4 else "neutral")
     print(f"  {k:<40} {bar}  {sentiment}")
 
@@ -221,10 +199,13 @@ print("\n⚠️   DISCLAIMER: Not financial advice. Model-based estimates only."
 print("=" * 60)
 
 # ─────────────────────────────────────────────
-# 7. CHART
+# 6. CHART
 # ─────────────────────────────────────────────
 fig, axes = plt.subplots(4, 1, figsize=(14, 14), facecolor="#0f0f0f")
-fig.suptitle("Silver Price Predictor Dashboard", color="silver", fontsize=16, fontweight="bold")
+fig.suptitle(
+    f"Silver Price Predictor  —  ${price:.2f}/oz  |  GSR {gsr:.1f}x  |  {signal.strip()}",
+    color="silver", fontsize=14, fontweight="bold"
+)
 
 ax1, ax2, ax3, ax4 = axes
 for ax in axes:
@@ -232,17 +213,16 @@ for ax in axes:
     ax.tick_params(colors="#aaaaaa")
     ax.spines[:].set_color("#333333")
 
-recent = ta[-500:]
+recent       = ta[-500:]
 silver_color = "#C0C0C0"
+future_dates = pd.date_range(silver_monthly.index[-1], periods=months_to_2030, freq="ME")
 
-# Panel 1: Price
-ax1.plot(recent.index, recent["silver"],  color=silver_color, lw=1.5, label="Silver")
+# Panel 1: Price + BB + 2030
+ax1.plot(recent.index, recent["silver"],  color=silver_color, lw=1.5, label="Silver spot")
 ax1.plot(recent.index, recent["sma50"],   color="#4fc3f7",    lw=1,   label="SMA 50",  alpha=0.8)
 ax1.plot(recent.index, recent["sma200"],  color="#ef5350",    lw=1,   label="SMA 200", alpha=0.8)
 ax1.fill_between(recent.index, recent["bb_lo"], recent["bb_hi"], alpha=0.1, color=silver_color)
-
-future_dates = pd.date_range(silver_monthly.index[-1], periods=months_to_2030, freq="ME")
-ax1.plot(future_dates, future_y, color="#69f0ae", lw=1.5, linestyle="--", label="2030 forecast")
+ax1.plot(future_dates, future_y, color="#69f0ae", lw=1.5, linestyle="--", label="2030 base")
 ax1.fill_between(
     [ta.index[-1], future_dates[-1]],
     [price, t2030_bear], [price, t2030_bull],
@@ -250,7 +230,7 @@ ax1.fill_between(
 )
 ax1.set_ylabel("Price USD/oz", color="#aaaaaa")
 ax1.legend(loc="upper left", facecolor="#1a1a1a", labelcolor="#cccccc", fontsize=8)
-ax1.set_title("Silver Price + Bollinger + 2030 Projection", color="#cccccc", fontsize=10)
+ax1.set_title("Silver Spot Price + Bollinger + 2030 Projection", color="#cccccc", fontsize=10)
 
 # Panel 2: Gold/Silver Ratio
 ax2.plot(recent.index, recent["gsr"], color="#ffd54f", lw=1.2, label="GSR")
@@ -264,13 +244,14 @@ ax2.set_title("Gold/Silver Ratio (high = silver undervalued)", color="#cccccc", 
 
 # Panel 3: RSI
 ax3.plot(recent.index, recent["rsi"], color="#ce93d8", lw=1.2)
-ax3.axhline(70, color="#ef5350", lw=0.8, linestyle="--")
-ax3.axhline(30, color="#69f0ae", lw=0.8, linestyle="--")
+ax3.axhline(70, color="#ef5350", lw=0.8, linestyle="--", label="Overbought 70")
+ax3.axhline(30, color="#69f0ae", lw=0.8, linestyle="--", label="Oversold 30")
 ax3.axhline(50, color="#555555", lw=0.5)
 ax3.fill_between(recent.index, recent["rsi"], 50, where=recent["rsi"] > 50, alpha=0.2, color="#ef5350")
 ax3.fill_between(recent.index, recent["rsi"], 50, where=recent["rsi"] < 50, alpha=0.2, color="#69f0ae")
 ax3.set_ylim(0, 100)
 ax3.set_ylabel("RSI", color="#aaaaaa")
+ax3.legend(loc="upper left", facecolor="#1a1a1a", labelcolor="#cccccc", fontsize=8)
 ax3.set_title("RSI (14)", color="#cccccc", fontsize=10)
 
 # Panel 4: MACD
@@ -291,5 +272,5 @@ for ax in axes:
 
 plt.tight_layout()
 plt.savefig("output/silver_prediction.png", dpi=150, bbox_inches="tight", facecolor="#0f0f0f")
-print("\n📈  Chart saved → silver_prediction.png")
+print("\n📈  Chart saved → output/silver_prediction.png")
 plt.show()
