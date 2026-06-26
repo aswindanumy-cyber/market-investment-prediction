@@ -533,45 +533,66 @@ def print_best_buy(df, label):
     return top
 
 # ─────────────────────────────────────────────
-# TABLE 2 — Best dividend ≤30 days
+# TABLE 2 — Best dividend ≤30 days, payout yield ≥10%
 # ─────────────────────────────────────────────
+MIN_PAYOUT_YIELD = 0.10   # div_per_share / price_per_share >= 10% per payout
+
 def print_best_dividend(df, label):
-    mask    = (
-        (df["div_yield"] > 0) &
+    """
+    Filter: ex-date within 30 days AND (last_div / price) >= 10%.
+    Ranked by payout yield descending. Top 20.
+    """
+    # per-payout yield = last dividend / current price (not annualised)
+    df = df.copy()
+    df["payout_yield"] = df.apply(
+        lambda r: (r["last_div"] / r["price"]) if r["price"] > 0 else 0, axis=1
+    )
+    df["div_per_lot"]   = df["last_div"] * 100
+    df["price_per_lot"] = df["price"]   * 100
+
+    mask = (
+        (df["last_div"] > 0) &
         (df["days_to_next"].notna()) &
         (df["days_to_next"] > 0) &
-        (df["days_to_next"] <= 30)
+        (df["days_to_next"] <= 30) &
+        (df["payout_yield"] >= MIN_PAYOUT_YIELD)
     )
-    div_df  = df[mask].sort_values("div_yield", ascending=False).head(10).reset_index(drop=True)
+    div_df = df[mask].sort_values("payout_yield", ascending=False).head(20).reset_index(drop=True)
 
-    print("\n" + "═" * 100)
-    print(f"   💵  {label} — UPCOMING EX-DIVIDEND ≤ 30 DAYS  (ranked by yield → biggest THP first)")
+    print("\n" + "═" * 115)
+    print(f"   💵  {label} — UPCOMING EX-DIVIDEND ≤30 DAYS  &  PAYOUT ≥10% per lot  (top 20, biggest THP first)")
     print(f"   Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("═" * 100)
+    print("═" * 115)
 
     if div_df.empty:
-        print("   ⚠️  No stocks found with ex-dividend within next 30 days.")
-        print("        Showing top 10 by annual yield instead:\n")
-        div_df = df[df["div_yield"] > 0].sort_values("div_yield", ascending=False).head(10).reset_index(drop=True)
+        print("   ⚠️  No stocks passed the filter (ex≤30d AND payout≥10%).")
+        print("        Relaxing to: ex≤30d only, any yield — top 20:\n")
+        fallback = df[
+            (df["last_div"] > 0) &
+            (df["days_to_next"].notna()) &
+            (df["days_to_next"] > 0) &
+            (df["days_to_next"] <= 30)
+        ].sort_values("payout_yield", ascending=False).head(20).reset_index(drop=True)
+        div_df = fallback
 
-    print(f"{'#':<3} {'Ticker':<11} {'H':<2} {'Signal':<10} {'Yield%':>6} {'Div/sh':>12} {'Next Ex':>12} {'Days':>5} {'Price':>12}")
-    print("─" * 100)
+    print(f"{'#':<3} {'Ticker':<11} {'H':<2} {'Signal':<10} "
+          f"{'Payout%':>8} {'Div/lot':>12} {'Price/lot':>12} {'THP@10lot':>12} {'Next Ex':>12} {'Days':>5}")
+    print("─" * 115)
     for i, r in enumerate(div_df.itertuples(), 1):
         h       = "✅" if r.halal_ok else "❌"
         next_ex = str(r.next_ex) if r.next_ex else "est."
         days    = str(int(r.days_to_next)) if r.days_to_next is not None else "?"
+        thp     = r.div_per_lot * 10 * 0.90   # 10 lots, after 10% PPh
         print(
             f"{i:<3} {r.ticker:<11} {h} {r.signal:<10} "
-            f"{r.div_yield:>5.1f}% Rp {r.last_div:>9,.0f} {next_ex:>12} {days:>5}d Rp {r.price:>9,.0f}"
+            f"{r.payout_yield:>7.1%} Rp {r.div_per_lot:>9,.0f} Rp {r.price_per_lot:>9,.0f} "
+            f"Rp {thp:>9,.0f} {next_ex:>12} {days:>5}d"
         )
 
-    print("─" * 100)
-    print("  THP formula: Div/share × lots × 100 × (1 − 10% PPh)")
-    if not div_df.empty:
-        top = div_df.iloc[0]
-        thp = top.last_div * 10 * 100 * 0.90
-        print(f"  Example #{1}: {top.ticker}  →  Rp {top.last_div:,.0f} × 10 lots × 100 − 10% PPh = Rp {thp:,.0f}")
-    print("═" * 100)
+    print("─" * 115)
+    print("  THP = Div/lot × lots × (1 − 10% PPh)   |   example above = 10 lots")
+    print("  Payout% = dividend per share ÷ price per share  (single payout, not annualised)")
+    print("═" * 115)
     print("\n⚠️   DISCLAIMER: Not financial advice.")
     return div_df
 
@@ -598,18 +619,25 @@ def plot_scanner(buy_df, div_df, title):
                  f"{row.score:.1f}  {'✅' if row.halal_ok else '❌'}",
                  va="center", color="#ccc", fontsize=8)
 
-    # Right: dividend yield (color = days urgency)
+    # Right: payout yield % per lot (color = days urgency)
     if not div_df.empty:
-        dd      = div_df.sort_values("div_yield", ascending=True)
+        _dd = div_df.copy()
+        if "payout_yield" not in _dd.columns:
+            _dd["payout_yield"] = _dd.apply(
+                lambda r: (r["last_div"] / r["price"]) if r["price"] > 0 else 0, axis=1
+            )
+        dd      = _dd.sort_values("payout_yield", ascending=True)
         day_c   = ["#ff5722" if (d or 999) <= 7 else ("#ff9800" if (d or 999) <= 14 else "#ffd54f")
                    for d in dd["days_to_next"]]
-        bars2   = ax2.barh(dd["ticker"], dd["div_yield"], color=day_c, edgecolor="#333")
-        ax2.set_xlabel("Dividend Yield %", color="#aaaaaa")
+        bars2   = ax2.barh(dd["ticker"], dd["payout_yield"] * 100, color=day_c, edgecolor="#333")
+        ax2.axvline(10, color="#69f0ae", lw=1, linestyle="--", label="≥10% threshold")
+        ax2.set_xlabel("Payout Yield % per lot", color="#aaaaaa")
+        ax2.legend(facecolor="#1a1a1a", labelcolor="#cccccc", fontsize=8)
         ax2.set_title("💵 Best Dividend ≤30 days  (🔴≤7d 🟠≤14d 🟡≤30d)", color="#cccccc", fontsize=11)
         for bar, row in zip(bars2, dd.itertuples()):
             days = f"{int(row.days_to_next)}d" if row.days_to_next is not None else "?"
             ax2.text(bar.get_width() + 0.05, bar.get_y() + bar.get_height()/2,
-                     f"{row.div_yield:.1f}%  ex:{days}  {'✅' if row.halal_ok else '❌'}",
+                     f"{row.payout_yield:.1%}  ex:{days}  {'✅' if row.halal_ok else '❌'}",
                      va="center", color="#ccc", fontsize=8)
     else:
         ax2.text(0.5, 0.5, "No upcoming\ndividend ≤30 days", transform=ax2.transAxes,
@@ -639,28 +667,54 @@ def run_halal():
     plot_scanner(buy_df, div_df, "IDX HALAL — Buy Now vs Dividend")
 
 def run_dividen():
-    """All stocks, ranked purely by upcoming dividend yield within 30 days."""
+    """Top 20 — ex-date ≤30 days AND payout per lot ≥10% of price per lot."""
     df     = scan_universe(halal_only=False)
-    # reuse print_best_dividend — it already sorts by yield & filters ≤30 days
     div_df = print_best_dividend(df, "IDX DIVIDEN")
-    # chart: single panel, all stocks with upcoming dividend
     if div_df.empty:
         return
-    dd    = div_df.sort_values("div_yield", ascending=True)
-    fig, ax = plt.subplots(figsize=(12, 6), facecolor="#0f0f0f")
-    fig.patch.set_facecolor("#0f0f0f")
-    ax.set_facecolor("#1a1a1a"); ax.tick_params(colors="#aaaaaa"); ax.spines[:].set_color("#333333")
+
+    # payout_yield col may not be in div_df if it came from print_best_dividend's fallback
+    if "payout_yield" not in div_df.columns:
+        div_df["payout_yield"] = div_df.apply(
+            lambda r: (r["last_div"] / r["price"]) if r["price"] > 0 else 0, axis=1
+        )
+    if "div_per_lot" not in div_df.columns:
+        div_df["div_per_lot"] = div_df["last_div"] * 100
+
+    dd    = div_df.sort_values("payout_yield", ascending=True)
+    h_fig = max(6, len(dd) * 0.45)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, h_fig), facecolor="#0f0f0f")
+    fig.suptitle(
+        "💵 IDX DIVIDEN — Ex-Dividend ≤30 days  &  Payout ≥10%/lot  (top 20)",
+        color="#ffd54f", fontsize=13, fontweight="bold"
+    )
+    for ax in (ax1, ax2):
+        ax.set_facecolor("#1a1a1a"); ax.tick_params(colors="#aaaaaa"); ax.spines[:].set_color("#333333")
+
+    # Left: payout yield %
     day_c = ["#ff5722" if (d or 999) <= 7 else ("#ff9800" if (d or 999) <= 14 else "#ffd54f")
               for d in dd["days_to_next"]]
-    bars  = ax.barh(dd["ticker"], dd["div_yield"], color=day_c, edgecolor="#333")
-    ax.set_xlabel("Dividend Yield %", color="#aaaaaa")
-    ax.set_title("💵 IDX DIVIDEN — Upcoming Ex-Dividend ≤30 days  (🔴≤7d 🟠≤14d 🟡≤30d)",
-                 color="#ffd54f", fontsize=12, fontweight="bold")
-    for bar, row in zip(bars, dd.itertuples()):
+    bars1 = ax1.barh(dd["ticker"], dd["payout_yield"] * 100, color=day_c, edgecolor="#333")
+    ax1.axvline(10, color="#69f0ae", lw=1, linestyle="--", label="10% threshold")
+    ax1.set_xlabel("Payout Yield % (single payout)", color="#aaaaaa")
+    ax1.legend(facecolor="#1a1a1a", labelcolor="#cccccc", fontsize=8)
+    ax1.set_title("Payout %  (🔴≤7d 🟠≤14d 🟡≤30d)", color="#cccccc", fontsize=10)
+    for bar, row in zip(bars1, dd.itertuples()):
         days = f"{int(row.days_to_next)}d" if row.days_to_next is not None else "?"
-        ax.text(bar.get_width() + 0.05, bar.get_y() + bar.get_height()/2,
-                f"{row.div_yield:.1f}%  ex:{days}  {'✅' if row.halal_ok else '❌'}",
-                va="center", color="#ccc", fontsize=8)
+        ax1.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height()/2,
+                 f"{row.payout_yield:.1%}  ex:{days}  {'✅' if row.halal_ok else '❌'}",
+                 va="center", color="#ccc", fontsize=8)
+
+    # Right: THP for 10 lots after PPh
+    dd["thp_10lots"] = dd["div_per_lot"] * 10 * 0.90
+    bars2 = ax2.barh(dd["ticker"], dd["thp_10lots"], color=day_c, edgecolor="#333")
+    ax2.set_xlabel("THP @ 10 lots, after 10% PPh  (IDR)", color="#aaaaaa")
+    ax2.set_title("THP Estimate — 10 Lots", color="#cccccc", fontsize=10)
+    for bar, row in zip(bars2, dd.itertuples()):
+        ax2.text(bar.get_width() * 1.01, bar.get_y() + bar.get_height()/2,
+                 f"Rp {row.thp_10lots:,.0f}",
+                 va="center", color="#ccc", fontsize=8)
+
     plt.tight_layout()
     fname = "output/DIVIDEN_scanner.png"
     plt.savefig(fname, dpi=150, bbox_inches="tight", facecolor="#0f0f0f")
