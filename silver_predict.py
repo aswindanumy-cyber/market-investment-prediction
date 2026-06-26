@@ -11,59 +11,30 @@ Dependencies:
   pip install yfinance pandas numpy scikit-learn matplotlib
 """
 
-import warnings
-warnings.filterwarnings("ignore")
-
+from _base import (
+    fetch, sma, ema, rsi, macd, bollinger,
+    price_targets, yearly_targets, signal_label,
+    dark_axes, fmt_date_axis, print_yearly_table,
+    VERY_BULLISH, BULLISH, NEUTRAL,
+)
 import numpy as np
 import pandas as pd
-import yfinance as yf
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
 from datetime import datetime
 
 # ─────────────────────────────────────────────
-# 1. FETCH DATA  (each ticker individually — avoids yfinance column-order bug)
+# 1. FETCH DATA
 # ─────────────────────────────────────────────
-def _fetch(ticker, period="5y"):
-    df = yf.download(ticker, period=period, interval="1d", auto_adjust=True, progress=False)["Close"]
-    if isinstance(df, pd.DataFrame):
-        df = df.squeeze()
-    return df.dropna().rename(ticker)
-
 print("📡  Fetching market data...")
-silver = _fetch("SI=F")        # Silver futures USD/troy oz
-gold   = _fetch("GC=F")        # Gold futures USD/troy oz (for GSR)
-usd    = _fetch("DX-Y.NYB")   # US Dollar Index
-copper = _fetch("HG=F")       # Copper (industrial proxy)
-vix    = _fetch("^VIX")       # Fear index
-rates  = _fetch("^TNX")       # US 10Y Treasury yield
+silver = fetch("SI=F")        # Silver futures USD/troy oz
+gold   = fetch("GC=F")        # Gold futures USD/troy oz (for GSR)
+usd    = fetch("DX-Y.NYB")   # US Dollar Index
+copper = fetch("HG=F")       # Copper (industrial proxy)
+vix    = fetch("^VIX")       # Fear index
+rates  = fetch("^TNX")       # US 10Y Treasury yield
 
 print(f"✅  Silver data: {silver.index[0].date()} → {silver.index[-1].date()}  ({len(silver)} days)")
 print(f"    Silver spot: ${silver.iloc[-1]:.2f}/oz   Gold spot: ${gold.iloc[-1]:.2f}/oz\n")
-
-# ─────────────────────────────────────────────
-# 2. TECHNICAL INDICATORS
-# ─────────────────────────────────────────────
-def sma(s, n): return s.rolling(n).mean()
-def ema(s, n): return s.ewm(span=n, adjust=False).mean()
-
-def rsi(s, n=14):
-    d = s.diff()
-    gain = d.clip(lower=0).rolling(n).mean()
-    loss = (-d.clip(upper=0)).rolling(n).mean()
-    rs = gain / loss.replace(0, np.nan)
-    return 100 - 100 / (1 + rs)
-
-def macd(s, fast=12, slow=26, signal=9):
-    m = ema(s, fast) - ema(s, slow)
-    return m, ema(m, signal)
-
-def bollinger(s, n=20, k=2):
-    mid = sma(s, n)
-    std = s.rolling(n).std()
-    return mid - k * std, mid, mid + k * std
 
 ta = pd.DataFrame(index=silver.index)
 ta["silver"]  = silver
@@ -123,38 +94,31 @@ elif total_score <= 4.0: signal = "🔴  SELL"
 else:                    signal = "🟡  HOLD"
 
 # ─────────────────────────────────────────────
-# 4. PRICE TARGETS
+# 4+5. PRICE TARGETS + 2030 PROJECTION  (from _base)
 # ─────────────────────────────────────────────
-# Winsorize at ±5% to strip futures-roll outliers before computing targets
-returns   = silver.pct_change().dropna()
-ret_clean = returns[-126:].clip(-0.05, 0.05)
-mu_daily  = ret_clean.mean()
-vol_daily = ret_clean.std()
-
-t3b  = max(price * (1 + mu_daily - vol_daily) ** 63,  price * 0.5)
-t3   = price * (1 + mu_daily) ** 63
-t3u  = price * (1 + mu_daily + vol_daily) ** 63
-t12b = max(price * (1 + mu_daily - vol_daily) ** 252, price * 0.3)
-t12  = price * (1 + mu_daily) ** 252
-t12u = price * (1 + mu_daily + vol_daily) ** 252
-
-silver_monthly  = silver.resample("ME").last()
-X               = np.arange(len(silver_monthly)).reshape(-1, 1)
-poly            = PolynomialFeatures(2)
-Xp              = poly.fit_transform(X)
-reg             = LinearRegression().fit(Xp, silver_monthly.values)
-months_to_2030  = (datetime(2030, 12, 31) - silver_monthly.index[-1]).days // 30
-future_X        = np.arange(len(silver_monthly), len(silver_monthly) + months_to_2030).reshape(-1, 1)
-future_y        = reg.predict(poly.transform(future_X))
-t2030           = max(future_y[-1], price)
-annual_vol      = returns.std() * np.sqrt(252)
-years_to_2030   = (datetime(2030, 12, 31) - datetime.now()).days / 365
-t2030_bull      = t2030 * (1 + annual_vol * 0.6) ** years_to_2030
-t2030_bear      = t2030 * (1 - annual_vol * 0.3) ** years_to_2030
+(t3b, t3, t3u), \
+(t12b, t12, t12u), \
+(t2030_bear, t2030, t2030_bull), \
+silver_monthly, future_X, future_y, poly, mu_log, vol_log = price_targets(silver)
 
 # ─────────────────────────────────────────────
-# 5. REPORT
+# 5. YEAR-BY-YEAR MACRO CALENDAR
 # ─────────────────────────────────────────────
+SILVER_MACRO_CALENDAR = {
+    2026: (1.10, BULLISH,
+           "Solar installs record; EV scaling; Fed cuts weaken USD; GSR mean reversion ongoing"),
+    2027: (1.15, VERY_BULLISH,
+           "Green energy capex peak; 5G silver paste demand; supply deficit widens 3rd yr"),
+    2028: (1.12, VERY_BULLISH,
+           "AI data centers (silver cooling/PCBs); US election fiscal push; ETF inflows surge"),
+    2029: (1.08, BULLISH,
+           "EV penetration >35%; primary mine depletion; BRICS+ monetary silver demand"),
+    2030: (1.15, VERY_BULLISH,
+           "Net-zero peak demand; perovskite solar 10x silver; structural deficit 200M oz/yr"),
+}
+
+yearly_silver = yearly_targets(price, mu_log, vol_log, SILVER_MACRO_CALENDAR)
+
 macro_factors = [
     ("Solar panel demand",   "Each panel uses ~20g silver; solar capacity doubling every 3yrs"),
     ("EV & battery tech",    "Silver conductivity critical in EV charging & battery management"),
@@ -182,10 +146,11 @@ for k, v in scores.items():
     sentiment = "bullish" if v >= 6 else ("bearish" if v <= 4 else "neutral")
     print(f"  {k:<40} {bar}  {sentiment}")
 
-print("\n── Price Targets ────────────────────────────────")
+print("\n── Short/Mid-Term Targets ───────────────────────")
 print(f"  3-Month  │ Bear: ${t3b:>7,.2f}  Base: ${t3:>7,.2f}  Bull: ${t3u:>7,.2f}")
 print(f"  12-Month │ Bear: ${t12b:>7,.2f}  Base: ${t12:>7,.2f}  Bull: ${t12u:>7,.2f}")
-print(f"  2030     │ Bear: ${t2030_bear:>7,.2f}  Base: ${t2030:>7,.2f}  Bull: ${t2030_bull:>7,.2f}")
+
+print_yearly_table(yearly_silver)
 
 print("\n── Macro & Industrial Tailwinds ─────────────────")
 for factor, reason in macro_factors:
@@ -208,10 +173,7 @@ fig.suptitle(
 )
 
 ax1, ax2, ax3, ax4 = axes
-for ax in axes:
-    ax.set_facecolor("#1a1a1a")
-    ax.tick_params(colors="#aaaaaa")
-    ax.spines[:].set_color("#333333")
+dark_axes(axes)
 
 recent       = ta[-500:]
 silver_color = "#C0C0C0"
@@ -265,10 +227,7 @@ ax4.set_ylabel("MACD", color="#aaaaaa")
 ax4.legend(loc="upper left", facecolor="#1a1a1a", labelcolor="#cccccc", fontsize=8)
 ax4.set_title("MACD (12, 26, 9)", color="#cccccc", fontsize=10)
 
-for ax in axes:
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=4))
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha="right")
+fmt_date_axis(axes)
 
 plt.tight_layout()
 plt.savefig("output/silver_prediction.png", dpi=150, bbox_inches="tight", facecolor="#0f0f0f")

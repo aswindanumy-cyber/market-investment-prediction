@@ -14,17 +14,16 @@ Dependencies:
   pip install yfinance pandas numpy scikit-learn matplotlib
 """
 
-import warnings
-warnings.filterwarnings("ignore")
-
+from _base import (
+    sma, ema, rsi, macd, bollinger,
+    price_targets, signal_label,
+    dark_axes, fmt_date_axis,
+)
 import sys
 import numpy as np
 import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
 from datetime import datetime, timedelta
 
 # ─────────────────────────────────────────────
@@ -68,26 +67,6 @@ MACRO = {
     "rates":   "^TNX",
 }
 
-# ─────────────────────────────────────────────
-# INDICATORS
-# ─────────────────────────────────────────────
-def sma(s, n): return s.rolling(n).mean()
-def ema(s, n): return s.ewm(span=n, adjust=False).mean()
-
-def rsi(s, n=14):
-    d = s.diff()
-    g = d.clip(lower=0).rolling(n).mean()
-    l = (-d.clip(upper=0)).rolling(n).mean()
-    return 100 - 100 / (1 + g / l.replace(0, np.nan))
-
-def macd(s, fast=12, slow=26, sig=9):
-    m = ema(s, fast) - ema(s, slow)
-    return m, ema(m, sig)
-
-def bollinger(s, n=20, k=2):
-    mid = sma(s, n)
-    std = s.rolling(n).std()
-    return mid - k * std, mid, mid + k * std
 
 # ─────────────────────────────────────────────
 # HALAL SCREENING (real: ISSI + debt ratio)
@@ -259,38 +238,6 @@ def score_stock(price_series, macro_df):
 
     return np.mean(list(sc.values())), sc, ta
 
-def signal_label(score):
-    if score is None:  return "❓ N/A"
-    if score >= 6.5:   return "🟢 BUY"
-    elif score <= 4.0: return "🔴 SELL"
-    else:              return "🟡 HOLD"
-
-# ─────────────────────────────────────────────
-# PRICE TARGETS
-# ─────────────────────────────────────────────
-def price_targets(price_series):
-    s         = price_series.dropna()
-    ret       = s.pct_change().dropna()
-    ret_clean = ret[-126:].clip(-0.05, 0.05)   # winsorize: strip gap/halt outliers
-    mu        = ret_clean.mean()
-    vol       = ret_clean.std()
-    p         = s.iloc[-1]
-
-    t3  = (max(p*(1+mu-vol)**63,  p*0.5), p*(1+mu)**63,  p*(1+mu+vol)**63)
-    t12 = (max(p*(1+mu-vol)**252, p*0.3), p*(1+mu)**252, p*(1+mu+vol)**252)
-
-    monthly = s.resample("ME").last()
-    X       = np.arange(len(monthly)).reshape(-1, 1)
-    poly    = PolynomialFeatures(2)
-    reg     = LinearRegression().fit(poly.fit_transform(X), monthly.values)
-    m2030   = (datetime(2030, 12, 31) - monthly.index[-1]).days // 30
-    fX      = np.arange(len(monthly), len(monthly) + m2030).reshape(-1, 1)
-    fy      = reg.predict(poly.transform(fX))
-    t2030_b = max(fy[-1], p)
-    ann_v   = ret_clean.std() * np.sqrt(252)
-    yrs     = (datetime(2030, 12, 31) - datetime.now()).days / 365
-    t2030   = (t2030_b*(1-ann_v*0.3)**yrs, t2030_b, t2030_b*(1+ann_v*0.6)**yrs)
-    return t3, t12, t2030, monthly, fX, fy, poly
 
 # ─────────────────────────────────────────────
 # CHART — 4 panels (like gold/silver)
@@ -317,10 +264,7 @@ def plot_stock(code, ta, price_series, div_info, t3, t12, t2030, monthly, fX, fy
         color=title_color, fontsize=13, fontweight="bold"
     )
     ax1, ax2, ax3, ax4 = axes
-    for ax in axes:
-        ax.set_facecolor("#1a1a1a")
-        ax.tick_params(colors="#aaaaaa")
-        ax.spines[:].set_color("#333333")
+    dark_axes(axes)
 
     recent = ta[-500:]
 
@@ -392,10 +336,7 @@ def plot_stock(code, ta, price_series, div_info, t3, t12, t2030, monthly, fX, fy
                  ha="center", va="center", color="#888888", fontsize=12)
         ax4.set_title("Dividend History", color="#cccccc", fontsize=9)
 
-    for ax in (ax1, ax2, ax3):
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=4))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha="right")
+    fmt_date_axis([ax1, ax2, ax3])
 
     plt.tight_layout()
     fname = f"output/{code}_prediction.png"
@@ -417,7 +358,7 @@ def run_single(ticker_code):
     halal_ok, debt_ratio, halal_desc = screen_halal(code)
     div_info  = get_dividend_info(code)
     score, scores, ta = score_stock(price_s, macro_df)
-    t3, t12, t2030, monthly, fX, fy, poly = price_targets(price_s)
+    t3, t12, t2030, monthly, fX, fy, poly, _mu, _vol = price_targets(price_s)
     price = price_s.iloc[-1]
 
     print("=" * 68)
@@ -603,8 +544,7 @@ def print_best_dividend(df, label):
 def plot_scanner(buy_df, div_df, title):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7), facecolor="#0f0f0f")
     fig.suptitle(title, color="#4fc3f7", fontsize=14, fontweight="bold")
-    for ax in (ax1, ax2):
-        ax.set_facecolor("#1a1a1a"); ax.tick_params(colors="#aaaaaa"); ax.spines[:].set_color("#333333")
+    dark_axes([ax1, ax2])
 
     # Left: best buy score
     bd = buy_df.sort_values("score", ascending=True)
@@ -689,8 +629,7 @@ def run_dividen():
         "💵 IDX DIVIDEN — Ex-Dividend ≤30 days  &  Payout ≥10%/lot  (top 20)",
         color="#ffd54f", fontsize=13, fontweight="bold"
     )
-    for ax in (ax1, ax2):
-        ax.set_facecolor("#1a1a1a"); ax.tick_params(colors="#aaaaaa"); ax.spines[:].set_color("#333333")
+    dark_axes([ax1, ax2])
 
     # Left: payout yield %
     day_c = ["#ff5722" if (d or 999) <= 7 else ("#ff9800" if (d or 999) <= 14 else "#ffd54f")
