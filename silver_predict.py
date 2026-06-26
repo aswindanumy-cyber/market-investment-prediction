@@ -177,7 +177,7 @@ dark_axes(axes)
 
 recent       = ta[-500:]
 silver_color = "#C0C0C0"
-future_dates = pd.date_range(silver_monthly.index[-1], periods=months_to_2030, freq="ME")
+future_dates = pd.date_range(silver_monthly.index[-1], periods=len(future_X), freq="ME")
 
 # Panel 1: Price + BB + 2030
 ax1.plot(recent.index, recent["silver"],  color=silver_color, lw=1.5, label="Silver spot")

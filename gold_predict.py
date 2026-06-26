@@ -199,7 +199,7 @@ ax1.plot(recent.index, recent["sma200"], color="#ef5350", lw=1,  label="SMA 200"
 ax1.fill_between(recent.index, recent["bb_lo"], recent["bb_hi"], alpha=0.1, color="gold")
 
 # Future projection
-future_dates = pd.date_range(gold_monthly.index[-1], periods=months_to_2030, freq="ME")
+future_dates = pd.date_range(gold_monthly.index[-1], periods=len(future_X), freq="ME")
 ax1.plot(future_dates, future_y, color="#69f0ae", lw=1.5, linestyle="--", label="2030 forecast (base)")
 ax1.fill_between(
     [ta.index[-1], future_dates[-1]],
