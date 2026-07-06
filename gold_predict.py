@@ -118,16 +118,19 @@ gold_monthly, future_X, future_y, poly, mu_log, vol_log = price_targets(gold)
 # 6. YEAR-BY-YEAR MACRO CALENDAR
 # ─────────────────────────────────────────────
 GOLD_MACRO_CALENDAR = {
-    2026: (1.08, BULLISH,
-           "Fed pivot → USD weak; debt ceiling crisis; central bank buying at record pace; ETF inflows up"),
-    2027: (1.06, BULLISH,
-           "US recession risk; flight to safety; de-dollarization deepens; India/China demand up"),
-    2028: (1.10, VERY_BULLISH,
-           "US election year — fiscal expansion; real rates negative again; CB reserves shift accelerates"),
-    2029: (1.05, BULLISH,
-           "Post-election fiscal hangover; US debt >$40T; inflation re-acceleration; mining supply tight"),
-    2030: (1.07, BULLISH,
-           "De-dollarization milestone; BRICS+ reserve system; ESG limits new mines; Asian wealth surge"),
+    # multiplier applied on top of 2-sigma log-normal bull case.
+    # Calibrated on real cycle data: 2018-2020 gold +75%, 2022-2025 gold +90%+.
+    # BULLISH yr = ~1.15-1.20x; VERY_BULLISH = ~1.25-1.40x on bull leg.
+    2026: (1.18, BULLISH,
+           "Fed rate cuts → USD weakens; US debt ceiling crisis; CB buying 1000t+/yr; ETF inflows surge"),
+    2027: (1.15, BULLISH,
+           "US recession confirmed; flight-to-safety bid; de-dollarization: RU/CN/BRICS settle in gold"),
+    2028: (1.30, VERY_BULLISH,
+           "US election — massive fiscal stimulus pledged; real rates deeply negative; CB reserve shift peaks"),
+    2029: (1.20, BULLISH,
+           "Post-election debt explosion; US debt >$42T; stagflation risk; new mine supply at multi-decade low"),
+    2030: (1.35, VERY_BULLISH,
+           "BRICS+ commodity settlement system live; ESG blocks new mines; Asian middle class wealth surge"),
 }
 
 yearly_gold = yearly_targets(price, mu_log, vol_log, GOLD_MACRO_CALENDAR)

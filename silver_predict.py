@@ -108,16 +108,19 @@ silver_monthly, future_X, future_y, poly, mu_log, vol_log = price_targets(silver
 # 5. YEAR-BY-YEAR MACRO CALENDAR
 # ─────────────────────────────────────────────
 SILVER_MACRO_CALENDAR = {
-    2026: (1.10, BULLISH,
-           "Solar installs record; EV scaling; Fed cuts weaken USD; GSR mean reversion ongoing"),
-    2027: (1.15, VERY_BULLISH,
-           "Green energy capex peak; 5G silver paste demand; supply deficit widens 3rd yr"),
-    2028: (1.12, VERY_BULLISH,
-           "AI data centers (silver cooling/PCBs); US election fiscal push; ETF inflows surge"),
-    2029: (1.08, BULLISH,
-           "EV penetration >35%; primary mine depletion; BRICS+ monetary silver demand"),
-    2030: (1.15, VERY_BULLISH,
-           "Net-zero peak demand; perovskite solar 10x silver; structural deficit 200M oz/yr"),
+    # Silver is more volatile than gold (beta ~1.5-2x) — multipliers calibrated accordingly.
+    # 2020 cycle: silver $12→$30 (+150%) in 6 months. 2011 peak: $49.
+    # Industrial + monetary dual demand means super-cycle moves are larger.
+    2026: (1.22, BULLISH,
+           "Record solar panel installs (1.5TW); EV boom; Fed cuts → USD weak; GSR mean reversion to 60:1"),
+    2027: (1.35, VERY_BULLISH,
+           "Green energy capex peak $1T+/yr; 5G silver paste; supply deficit 3rd consecutive year >150M oz"),
+    2028: (1.30, VERY_BULLISH,
+           "AI data center silver (PCBs/cooling); US election fiscal flood; ETF inflows; GSR compresses to 50:1"),
+    2029: (1.25, BULLISH,
+           "EV penetration >40% globally; primary mine depletion; BRICS+ monetary silver reserve building"),
+    2030: (1.40, VERY_BULLISH,
+           "Net-zero peak: perovskite solar needs 10x silver/panel; structural deficit 250M oz/yr; price discovery"),
 }
 
 yearly_silver = yearly_targets(price, mu_log, vol_log, SILVER_MACRO_CALENDAR)

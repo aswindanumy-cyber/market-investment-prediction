@@ -104,15 +104,34 @@ def yearly_targets(price, mu, vol, macro_calendar):
     Year-by-year prediction table with macro multipliers applied.
     macro_calendar: { year: (multiplier, sentiment_str, driver_text) }
     Returns list of (year, bear, base, bull, sentiment, driver).
+
+    Uses proper log-normal projection:
+      base = price * exp(mu_ann * t)
+      bull = price * exp(mu_ann * t + 2 * vol_ann * sqrt(t)) * macro_adj
+      bear = price * exp(mu_ann * t - 1.5 * vol_ann * sqrt(t))
+    mu and vol come in as DAILY values — annualised here.
     """
-    rows = []
+    rows        = []
+    mu_ann      = mu  * 252          # annualise daily log-return mean
+    vol_ann     = vol * np.sqrt(252) # annualise daily log-return std
+    now         = datetime.now()
+
     for yr in range(2026, 2031):
-        days   = (datetime(yr, 12, 31) - datetime.now()).days
-        t_base = price * np.exp(mu * days)
-        t_bull = price * np.exp(mu * days + 2 * vol * np.sqrt(days))
-        t_bear = price * np.exp(mu * days - 2 * vol * np.sqrt(days))
+        t = max((datetime(yr, 12, 31) - now).days / 365.0, 0.01)
+
+        t_base = price * np.exp(mu_ann * t)
+        t_bull = price * np.exp(mu_ann * t + 2.0 * vol_ann * np.sqrt(t))
+        t_bear = price * np.exp(mu_ann * t - 1.5 * vol_ann * np.sqrt(t))
+
         adj, sentiment, drivers = macro_calendar.get(yr, (1.0, NEUTRAL, "No specific event"))
-        rows.append((yr, t_bear / adj, t_base * adj, t_bull * adj, sentiment, drivers))
+
+        # Macro multiplier applied to bull and blended into base — no artificial cap
+        final_bull = t_bull * adj
+        final_base = t_base * (1 + (adj - 1) * 0.35)
+        final_bear = t_bear  # bear case intentionally unaffected by macro optimism
+
+        rows.append((yr, round(final_bear, 2), round(final_base, 2), round(final_bull, 2), sentiment, drivers))
+
     return rows
 
 # ─────────────────────────────────────────────
