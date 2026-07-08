@@ -181,6 +181,17 @@ MACRO_TOPICS_SILVER = [
     ("Inflation hedge",       ["inflation", "cpi", "real rate", "dollar weakness", "hedge"]),
 ]
 
+MACRO_TOPICS_COPPER = [
+    ("China manufacturing PMI", ["china pmi", "china manufacturing", "china factory", "china industrial output"]),
+    ("EV & grid electrification", ["electric vehicle", "ev ", "grid", "electrification", "charging infrastructure"]),
+    ("Data center & AI buildout", ["data center", "ai infrastructure", "hyperscaler", "cloud capex"]),
+    ("Green energy infrastructure", ["renewable", "solar farm", "wind farm", "transmission line", "net zero"]),
+    ("Global mine supply",      ["copper mine", "copper supply", "copper production", "smelter"]),
+    ("Housing & construction",  ["housing starts", "construction", "homebuilder", "real estate"]),
+    ("Inventory levels",        ["lme inventory", "comex copper", "copper stockpile", "copper warehouse"]),
+    ("US-China trade tensions", ["trade war", "tariff", "us-china", "export control"]),
+]
+
 MACRO_TOPICS_GOLD = [
     ("De-dollarization",      ["de-dollarization", "dollar reserve", "brics", "dollar dump"]),
     ("US debt trajectory",    ["us debt", "national debt", "debt ceiling", "deficit"]),
@@ -203,7 +214,7 @@ def _av_fetch_news(api_key, asset="GOLD", limit=50):
     come back, fall through to broad commodities+economy topic search.
     Only valid stock/ETF symbols work in AV tickers param — no futures codes.
     """
-    ticker_map = {"GOLD": "GLD,IAU", "SILVER": "SLV,SIVR"}
+    ticker_map = {"GOLD": "GLD,IAU", "SILVER": "SLV,SIVR", "COPPER": "CPER,COPX"}
     tickers    = ticker_map.get(asset, "GLD")
 
     def _call(params):

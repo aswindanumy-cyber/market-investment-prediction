@@ -1,6 +1,6 @@
 #!/bin/sh
 while true; do
-  for MODE in gold silver TOP10 HALAL DIVIDEN; do
+  for MODE in gold silver copper TOP10 HALAL DIVIDEN; do
     echo ""
     echo "════════════════════════════════════════"
     echo "  MODE: $MODE"
