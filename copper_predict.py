@@ -116,9 +116,35 @@ COPPER_MACRO_CALENDAR = {
            "Grid electrification capex peaks in US/EU; recycling can't offset primary demand gap"),
     2030: (1.32, VERY_BULLISH,
            "Net-zero transition requires 2x current copper output; supply response too slow; price discovery"),
+    # 2031-2035: same magnitude range as 2026-2030 above (1.10-1.25x/yr),
+    # continuing the existing electrification/supply-deficit thesis rather
+    # than escalating it. Edit the text/numbers to your own view same as the
+    # rows above; these are placeholders in the same style, not a claim.
+    2031: (1.16, BULLISH,
+           "Grid buildout continues in emerging markets; ore grade decline persists at existing mines"),
+    2032: (1.14, BULLISH,
+           "Data center/AI power demand keeps growing; new mine permitting still multi-year lag"),
+    2033: (1.20, BULLISH,
+           "Recycling capacity investment starts catching up but primary deficit remains"),
+    2034: (1.12, NEUTRAL,
+           "Demand growth moderates as substitution (aluminum) responds to a decade of higher prices"),
+    2035: (1.22, BULLISH,
+           "Ten-year electrification buildout largely priced in; supply response finally scales"),
 }
 
-yearly_copper = yearly_targets(price, mu_log, vol_log, COPPER_MACRO_CALENDAR)
+PREDICTION_SPECIAL_CALENDAR = {
+    2027: (1.0, None),
+    2028: (1.0, None),
+    2029: (1.0, None),
+    2030: (1.0, None),
+    2031: (1.0, None),
+    2032: (1.0, None),
+    2033: (1.0, None),
+    2034: (1.0, None),
+    2035: (1.0, None),
+}
+
+yearly_copper = yearly_targets(price, mu_log, vol_log, COPPER_MACRO_CALENDAR, PREDICTION_SPECIAL_CALENDAR)
 
 
 print("=" * 60)
@@ -141,7 +167,7 @@ print("\n── Short/Mid-Term Targets ─────────────�
 print(f"  3-Month  │ Bear: ${t3b:>7,.3f}  Base: ${t3:>7,.3f}  Bull: ${t3u:>7,.3f}")
 print(f"  12-Month │ Bear: ${t12b:>7,.3f}  Base: ${t12:>7,.3f}  Bull: ${t12u:>7,.3f}")
 
-print_yearly_table(yearly_copper)
+print_yearly_table(yearly_copper, spot_price=price)
 
 _cgr_v  = float(cgr)
 _dxy_v  = float(usd.iloc[-1])

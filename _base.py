@@ -99,38 +99,68 @@ def price_targets(price_series, sigma=2):
     )
     return t3, t12, t2030, monthly, fX, fy, poly, mu, vol
 
-def yearly_targets(price, mu, vol, macro_calendar):
+def yearly_targets(price, mu, vol, macro_calendar, special_calendar=None, bear_floor=0.25, end_year=2035):
     """
-    Year-by-year prediction table with macro multipliers applied.
-    macro_calendar: { year: (multiplier, sentiment_str, driver_text) }
-    Returns list of (year, bear, base, bull, sentiment, driver).
+    Year-by-year prediction table, driven by the macro narrative — not a
+    trailing-drift extrapolation from today's spot.
 
-    Uses proper log-normal projection:
-      base = price * exp(mu_ann * t)
-      bull = price * exp(mu_ann * t + 2 * vol_ann * sqrt(t)) * macro_adj
-      bear = price * exp(mu_ann * t - 1.5 * vol_ann * sqrt(t))
-    mu and vol come in as DAILY values — annualised here.
+    Each year's macro multiplier (`adj`) compounds onto the PREVIOUS year's
+    base, not onto today's spot every time: a multi-year structural thesis
+    (supply deficits, demand supercycles, monetary regime shifts) is a chain
+    of "this year builds on last year," so 2030's number should reflect five
+    years of compounding narrative, not a single damped extrapolation of a
+    6-month trailing average. This is deliberate for 2027-2030: those years
+    are explicitly meant to price in events with no historical precedent to
+    revert to, so the macro_calendar thesis — not the trailing statistical
+    mu — is the primary driver of the base case for every year past the
+    first. Year 2026 alone blends in recent momentum, since the immediate
+    near-term still carries real information from current price action.
+
+    special_calendar: { year: (multiplier, label) }, separate from
+    macro_calendar and OFF (multiplier=1.0) by default for every year. This
+    is a deliberately explicit, user-declared input for named, one-off
+    tail-risk events (a specific war, election, monetary-regime change) —
+    it is never inferred or estimated by this function, only applied
+    verbatim when the caller sets a year to something other than 1.0.
+    Compounds on top of the macro_calendar multiplier for that year and is
+    reported as its own field so it's visibly distinguishable in output from
+    the macro-news-driven base case, instead of being silently blended in.
+
+    vol (trailing daily volatility) still sets the bear/bull uncertainty
+    band around each year's narrative-driven base — one year of vol per
+    step, compounding alongside the base rather than over the full multi-
+    year horizon at once (which is what made the old bull/bear spread
+    explode implausibly by 2030).
+
+    bear_floor: hard floor as a fraction of today's price — a boundary of
+    last resort (e.g. temporary panic/liquidity crunch), not a statistical
+    projection.
     """
-    rows        = []
-    mu_ann      = mu  * 252          # annualise daily log-return mean
-    vol_ann     = vol * np.sqrt(252) # annualise daily log-return std
-    now         = datetime.now()
+    rows    = []
+    mu_ann  = mu  * 252
+    vol_ann = vol * np.sqrt(252)
+    now     = datetime.now()
+    special_calendar = special_calendar or {}
 
-    for yr in range(2026, 2031):
-        t = max((datetime(yr, 12, 31) - now).days / 365.0, 0.01)
-
-        t_base = price * np.exp(mu_ann * t)
-        t_bull = price * np.exp(mu_ann * t + 2.0 * vol_ann * np.sqrt(t))
-        t_bear = price * np.exp(mu_ann * t - 1.5 * vol_ann * np.sqrt(t))
-
+    base_running = price
+    for i, yr in enumerate(range(2026, end_year + 1)):
         adj, sentiment, drivers = macro_calendar.get(yr, (1.0, NEUTRAL, "No specific event"))
+        special_adj, special_label = special_calendar.get(yr, (1.0, None))
 
-        # Macro multiplier applied to bull and blended into base — no artificial cap
-        final_bull = t_bull * adj
-        final_base = t_base * (1 + (adj - 1) * 0.35)
-        final_bear = t_bear  # bear case intentionally unaffected by macro optimism
+        if i == 0:
+            t = max((datetime(yr, 12, 31) - now).days / 365.0, 0.01)
+            base_running = price * np.exp(mu_ann * t) * adj * special_adj
+        else:
+            base_running = base_running * adj * special_adj
 
-        rows.append((yr, round(final_bear, 2), round(final_base, 2), round(final_bull, 2), sentiment, drivers))
+        spread = vol_ann * np.sqrt(1.0)
+        t_bull = base_running * np.exp(2.0 * spread)
+        t_bear = max(base_running * np.exp(-1.5 * spread), price * bear_floor)
+
+        rows.append((
+            yr, round(t_bear, 2), round(base_running, 2), round(t_bull, 2),
+            sentiment, drivers, special_adj, special_label,
+        ))
 
     return rows
 
@@ -341,13 +371,31 @@ def fmt_date_axis(axes):
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=4))
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha="right")
 
-def print_yearly_table(yearly_rows, unit="$"):
+def print_yearly_table(yearly_rows, unit="$", spot_price=None):
+    """
+    spot_price: today's price, used to print each bear/base/bull figure's
+    % change from today (not year-over-year) in parentheses next to it.
+    Omit to print the table without the percentage column (backward compatible).
+    """
+    def _fmt(val):
+        if spot_price is None or spot_price == 0:
+            return f"{unit}{val:>11,.2f}"
+        pct = (val - spot_price) / spot_price * 100
+        return f"{unit}{val:>11,.2f} ({pct:+.0f}%)"
+
     print(f"\n── Year-by-Year Prediction (macro-adjusted) ─────")
-    print(f"  {'Year':<6} {'Sentiment':<13} {'Bear':>12}  {'Base':>12}  {'Bull':>12}   Key Driver")
-    print("  " + "─" * 100)
-    for yr, t_bear, t_base, t_bull, sentiment, drivers in yearly_rows:
+    print(f"  {'Year':<6} {'Sentiment':<13} {'Bear':>18}  {'Base':>18}  {'Bull':>18}   Key Driver")
+    print("  " + "─" * 120)
+    for row in yearly_rows:
+        yr, t_bear, t_base, t_bull, sentiment, drivers, *special = row
         short = drivers[:58] + "..." if len(drivers) > 58 else drivers
-        print(f"  {yr:<6} {sentiment:<13} {unit}{t_bear:>11,.2f}  {unit}{t_base:>11,.2f}  {unit}{t_bull:>11,.2f}   {short}")
+        print(f"  {yr:<6} {sentiment:<13} {_fmt(t_bear):>18}  {_fmt(t_base):>18}  {_fmt(t_bull):>18}   {short}")
+        # special = [special_adj, special_label] when yearly_targets() was called
+        # with a special_calendar — a user-declared tail event, kept visibly
+        # separate from the macro-news driver line above rather than blended in.
+        if len(special) == 2 and special[1]:
+            special_adj, special_label = special
+            print(f"  {'':<6} {'⚡ SPECIAL':<13} {'':>18}  {'':>18}  {'':>18}   {special_adj:.2f}x — {special_label}")
 
 # ─────────────────────────────────────────────
 # LIVE NEWS  (Yahoo Finance, no API key needed)

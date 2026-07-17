@@ -121,9 +121,47 @@ SILVER_MACRO_CALENDAR = {
            "EV penetration >40% globally; primary mine depletion; BRICS+ monetary silver reserve building"),
     2030: (1.40, VERY_BULLISH,
            "Net-zero peak: perovskite solar needs 10x silver/panel; structural deficit 250M oz/yr; price discovery"),
+    # 2031-2035: same modest structural-growth magnitude as 2026-2030 above
+    # (1.15-1.30x/yr) — continuing the existing supply/demand thesis, not an
+    # escalating multiplier. Edit the text/numbers to your own view same as
+    # the rows above; these are placeholders in the same style, not a claim.
+    2031: (1.20, BULLISH,
+           "Solar capacity continues compounding; silver recycling still short of new demand"),
+    2032: (1.18, BULLISH,
+           "EV fleet replacement cycle; grid storage buildout adds industrial demand"),
+    2033: (1.22, BULLISH,
+           "Primary mine supply continues declining; byproduct (copper/zinc) output growth insufficient"),
+    2034: (1.15, NEUTRAL,
+           "Demand growth moderates as substitution/thrifting responds to a decade of higher prices"),
+    2035: (1.25, BULLISH,
+           "Ten-year cumulative deficit forces price discovery; GSR reversion largely played out"),
 }
 
-yearly_silver = yearly_targets(price, mu_log, vol_log, SILVER_MACRO_CALENDAR)
+# ─────────────────────────────────────────────
+# 5b. SPECIAL EVENT CALENDAR — explicit, user-declared tail risks only.
+# OFF (1.0x, no effect) for every year by default. This is NOT estimated or
+# inferred by the model — only fill in a year here if you're deliberately
+# pricing in a specific named, one-off event (a war, election outcome,
+# monetary-regime change) on top of the macro-news multipliers above. Kept
+# separate and clearly labeled in the printed table so it's never confused
+# with the macro-news-driven forecast.
+# Example: 2030: (3.0, "Assumed monetary-regime shift — user-declared, not modeled")
+# ─────────────────────────────────────────────
+PREDICTION_SPECIAL_CALENDAR = {
+    2027: (1.0, None),
+    2028: (1.2, "US Election"),
+    2029: (1.0, None),
+    2030: (2.0, "The great reset"),
+    2031: (1.0, None),
+    2032: (1.0, None),
+    2033: (1.0, None),
+    2034: (1.0, None),
+    2035: (1.0, None),
+}
+
+yearly_silver = yearly_targets(
+    price, mu_log, vol_log, SILVER_MACRO_CALENDAR, PREDICTION_SPECIAL_CALENDAR,
+)
 
 
 print("=" * 60)
@@ -146,7 +184,7 @@ print("\n── Short/Mid-Term Targets ─────────────�
 print(f"  3-Month  │ Bear: ${t3b:>7,.2f}  Base: ${t3:>7,.2f}  Bull: ${t3u:>7,.2f}")
 print(f"  12-Month │ Bear: ${t12b:>7,.2f}  Base: ${t12:>7,.2f}  Bull: ${t12u:>7,.2f}")
 
-print_yearly_table(yearly_silver)
+print_yearly_table(yearly_silver, spot_price=price)
 
 _gsr_v  = float(last["gsr"])
 _dxy_v  = float(usd.iloc[-1])

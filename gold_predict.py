@@ -131,9 +131,35 @@ GOLD_MACRO_CALENDAR = {
            "Post-election debt explosion; US debt >$42T; stagflation risk; new mine supply at multi-decade low"),
     2030: (1.35, VERY_BULLISH,
            "BRICS+ commodity settlement system live; ESG blocks new mines; Asian middle class wealth surge"),
+    # 2031-2035: same magnitude range as 2026-2030 above (1.10-1.25x/yr),
+    # continuing the existing debt/de-dollarization/CB-buying thesis rather
+    # than escalating it. Edit the text/numbers to your own view same as the
+    # rows above; these are placeholders in the same style, not a claim.
+    2031: (1.15, BULLISH,
+           "CB gold buying continues at elevated pace; real yields stay compressed post-debt-crisis"),
+    2032: (1.12, BULLISH,
+           "US election cycle fiscal uncertainty; gold's monetary-hedge demand persists"),
+    2033: (1.18, BULLISH,
+           "Mine supply growth remains structurally low; reserve diversification away from USD continues"),
+    2034: (1.10, NEUTRAL,
+           "Demand growth moderates after a decade of CB buying; price consolidates prior gains"),
+    2035: (1.20, BULLISH,
+           "Decade-long de-dollarization trend matures; gold's reserve-asset share stabilizes higher"),
 }
 
-yearly_gold = yearly_targets(price, mu_log, vol_log, GOLD_MACRO_CALENDAR)
+PREDICTION_SPECIAL_CALENDAR = {
+    2027: (1.0, None),
+    2028: (1.0, None),
+    2029: (1.0, None),
+    2030: (1.0, None),
+    2031: (1.0, None),
+    2032: (1.0, None),
+    2033: (1.0, None),
+    2034: (1.0, None),
+    2035: (1.0, None),
+}
+
+yearly_gold = yearly_targets(price, mu_log, vol_log, GOLD_MACRO_CALENDAR, PREDICTION_SPECIAL_CALENDAR)
 
 
 # ─────────────────────────────────────────────
@@ -158,12 +184,7 @@ print("\n── Short/Mid-Term Targets ─────────────�
 print(f"  3-Month  │ Bear: ${target_3m_bear:>8,.0f}  Base: ${target_3m_base:>8,.0f}  Bull: ${target_3m_bull:>8,.0f}")
 print(f"  12-Month │ Bear: ${target_1y_bear:>8,.0f}  Base: ${target_1y_base:>8,.0f}  Bull: ${target_1y_bull:>8,.0f}")
 
-print("\n── Year-by-Year Prediction (macro-adjusted) ─────")
-print(f"  {'Year':<6} {'Sentiment':<13} {'Bear':>8}  {'Base':>8}  {'Bull':>8}   Key Driver")
-print("  " + "─" * 90)
-for yr, t_bear, t_base, t_bull, sentiment, drivers in yearly_gold:
-    short_driver = drivers[:60] + "..." if len(drivers) > 60 else drivers
-    print(f"  {yr:<6} {sentiment:<13} ${t_bear:>7,.0f}  ${t_base:>7,.0f}  ${t_bull:>7,.0f}   {short_driver}")
+print_yearly_table(yearly_gold, spot_price=price)
 
 _dxy_v  = float(usd.iloc[-1])
 _r_v    = float(rates.iloc[-1])
